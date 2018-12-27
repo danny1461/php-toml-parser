@@ -118,6 +118,8 @@ class Toml {
 					else {
 						$path[] = count($value);
 					}
+
+					$this->setKeyValueWithPath($this->data, $path, []);
 				}
 
 				$this->readTable($tokenGen, $path);
@@ -232,7 +234,7 @@ class Toml {
 			}
 
 			// What is it?
-			if (!$str) {
+			if ($str == '') {
 				throw new Exception();
 			}
 
@@ -244,7 +246,9 @@ class Toml {
 			}
 			elseif (preg_match(self::INT_REGEX, $str, $matches)) {
 				unset($matches[0]);
-				$matches = array_filter($matches);
+				$matches = array_filter($matches, function($item) {
+					return $item != '';
+				});
 				if (count($matches) == 1) {
 					array_unshift($matches, '');
 				}
@@ -256,10 +260,10 @@ class Toml {
 				}
 
 				if ($matches[1][0] == '_') {
-					throw new Exception('Integers with underscores must have a digit on either side', $startOffset + strlen($matches[0]));
+					throw new Exception('Integers with underscores must have a digit on both sides', $startOffset);
 				}
 				elseif ($matches[1][strlen($matches[1]) - 1] == '_') {
-					throw new Exception('Integers with underscores must have a digit on either side', $startOffset + strlen($matches[1]) - 1 + strlen($matches[0]));
+					throw new Exception('Integers with underscores must have a digit on both sides', $startOffset + strlen($matches[1]) - 1 + strlen($matches[0]));
 				}
 
 				$matches[1] = str_replace('_', '', $matches[1]);
@@ -286,9 +290,38 @@ class Toml {
 				return intval($val);
 			}
 			elseif (preg_match(self::FLOAT_REGEX, $str, $matches)) {
-				$val = floatval($matches[1]);
-				if (!empty($matches[2])) {
-					$val = $val * pow(10, $matches[2]);
+				if (empty($matches[4])) {
+					if ($matches[1][0] == '_') {
+						throw new Exception('Floats with underscores must have a digit on both sides', $startOffset);
+					}
+					elseif ($matches[1][strlen($matches[1]) - 1] == '_') {
+						throw new Exception('Floats with underscores must have a digit on both sides', $startOffset + strlen($matches[1]));
+					}
+
+					$matches[1] = str_replace('_', '', $matches[1]);
+
+					$val = floatval($matches[1]);
+					if (!empty($matches[2])) {
+						if ($matches[2][0] == '_') {
+							throw new Exception('Floats with underscores must have a digit on both sides', $startOffset + strlen($matches[1]) + 1);
+						}
+						elseif ($matches[2][strlen($matches[2]) - 1] == '_') {
+							throw new Exception('Floats with underscores must have a digit on both sides', $startOffset + strlen($matches[1]) + strlen($matches[2]));
+						}
+	
+						$matches[2] = str_replace('_', '', $matches[2]);
+
+						$val = $val * pow(10, $matches[2]);
+					}
+				}
+				else {
+					$val = 1;
+					if (!empty($matches[3])) {
+						$val = intval($matches[3] . '1');
+					}
+
+					$matches[4] = strtoupper($matches[4]);
+					$val = $val * constant($matches[4]);
 				}
 
 				return $val;
@@ -297,10 +330,15 @@ class Toml {
 				unset($matches[0]);
 				$matches = array_values(array_filter($matches));
 				
-				$val = $matches[0] . ' ' . $matches[1];
-				if (!empty($matches[2])) {
-					$matches[2] = intval($matches[2]);
-					$val .= '-' . str_pad($matches[2], 2, '0', STR_PAD_LEFT) . ':00';
+				$val = $matches[0];
+
+				if (!empty($matches[1])) {
+					$val .= ' ' . $matches[1];
+
+					if (!empty($matches[2])) {
+						$matches[2] = intval($matches[2]);
+						$val .= '-' . str_pad($matches[2], 2, '0', STR_PAD_LEFT) . ':00';
+					}
 				}
 
 				return $val;
@@ -438,6 +476,7 @@ class Toml {
 
 	private function readArray($tokenGen) {
 		$data = [];
+		$type = null;
 
 		$tokenGen->next();
 		while ($tokenGen->valid()) {
@@ -452,7 +491,14 @@ class Toml {
 				return $data;
 			}
 
+			$token = $tokenGen->current();
 			$value = $this->readValue($tokenGen);
+			if (is_null($type)) {
+				$type = gettype($value);
+			}
+			elseif ($type != gettype($value)) {
+				throw new Exception("Array of type {$type} cannot contain data of type " . gettype($value), $token['offset']);
+			}
 
 			$data[] = $value;
 		}
@@ -617,8 +663,8 @@ class Toml {
 		}
 	}
 
-	public const INT_REGEX = '/^(0x)([0-9A-F_]+)$|^(0o)([0-7_]+)$|^(0b)([01_]+)$|^([0-9_]+)$/i';
-	public const FLOAT_REGEX = '/^([+-]?[0-9]+(?:\\.[0-9]+)?)(e[+-]?[0-9]+)?$/i';
+	public const INT_REGEX = '/^(0x)([0-9A-F_]+)$|^(0o)([0-7_]+)$|^(0b)([01_]+)$|^([+-]?[0-9_]+)$/i';
+	public const FLOAT_REGEX = '/^([+-]?[0-9_]+(?:\\.[0-9_]+)?)(?:e([+-]?[0-9_]+))?$|^([+-])?(inf|nan)$/i';
 	public const DATE_REGEX = '/^(\\d{4}-\\d{2}-\\d{2})(?:T?(\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?))?(?:Z(\\d{1,2})?|-(\\d{2}):\\d{2})?$/';
 	public const TIME_REGEX = '/^(\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?)$/';
 	public const VALUE_TERMINATORS = "\n,}]";
