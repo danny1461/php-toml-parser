@@ -6,7 +6,7 @@ if (isset($_POST['toml'])) {
 	$toml = $_POST['toml'];
 
 	try {
-		$tomlObj = new Toml($toml);
+		$tomlData = Toml::parse($toml);
 	}
 	catch (Exception $e) {
 		$exception = $e;
@@ -92,7 +92,7 @@ if (!isset($toml)) {
 		</div>
 		<?php endif; ?>
 
-		<?php if (isset($tomlObj)) : ?>
+		<?php if (isset($tomlData)) : ?>
 		<div class="row">
 			<div class="col">
 				<h2>Parsed Output</h2>
@@ -104,7 +104,7 @@ if (!isset($toml)) {
 					ini_set('xdebug.var_display_max_depth', '10');
 				}
 
-				var_dump($tomlObj->data);
+				var_dump($tomlData);
 
 				if (!ini_get('xdebug.overload_var_dump')) {
 					echo '</pre>';
