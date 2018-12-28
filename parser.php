@@ -86,10 +86,17 @@ class Toml {
 	}
 
 	/* Process Token Helpers */
-	private function readTable($tokenGen, $path) {
+	private function readTable($tokenGen, $path, $arrNdx = false, $depth = 0) {
 		$key = false;
 		$value = false;
-		$lineClear = false;
+		$lineClear = true;
+		$valuePath = $path;
+		$definedChildTables = [];
+
+		if ($arrNdx !== false) {
+			$valuePath[] = $arrNdx;
+			$this->setKeyValueWithPath($this->data, $valuePath, []);
+		}
 
 		while ($tokenGen->valid()) {
 			$token = $tokenGen->current();
@@ -101,29 +108,71 @@ class Toml {
 			}
 
 			if ($token['type'] == '[') {
-				$tableArr = strlen($token['txt']) == 2;
+				$tableType = $token['txt'];
 				$tokenGen->next();
-				$path = $this->readPath($tokenGen);
-				$closeToken = $tokenGen->current();
-				if ($closeToken['type'] != ']' || strlen($closeToken['txt']) != strlen($token['txt'])) {
+				$token = $tokenGen->current();
+				$definitionOffset = $token['offset'];
+				$newPath = $this->readPath($tokenGen);
+				$token = $tokenGen->current();
+				if ($token['type'] != ']' || strlen($token['txt']) != strlen($tableType)) {
 					throw new Exception();
 				}
 				$tokenGen->next();
-
-				if ($tableArr) {
-					$value = $this->getValueWithPath($this->data, $path);
-					if (is_null($value)) {
-						$path[] = 0;
-					}
-					else {
-						$path[] = count($value);
-					}
-
-					$this->setKeyValueWithPath($this->data, $path, []);
+				if (!$tokenGen->valid()) {
+					return [null, null, $definitionOffset];
+				}
+				$token = $tokenGen->current();
+				if ($token['txt'] != "\n") {
+					throw new Exception();
 				}
 
-				$this->readTable($tokenGen, $path);
-				break;
+				while ($newPath) {
+					if ($newPath == $path) {
+						if (($arrNdx !== false) != ($tableType == '[[')) {
+							$fullPath = implode('.', array_map(function($item) {
+								return '"' . $item . '"';
+							}, $path));
+							throw new Exception("You can not redefine {$fullPath}", $definitionOffset);
+						}
+
+						return [$newPath, $tableType, $definitionOffset];
+					}
+					elseif (array_slice($newPath, 0, count($path)) != $path) {
+						return [$newPath, $tableType, $definitionOffset];
+					}
+					elseif ($arrNdx !== false) {
+						$newPath = array_merge($valuePath, array_slice($newPath, count($path)));
+					}
+
+					$tableArrNdx = false;
+					if ($tableType == '[[') {
+						$value = $this->getValueWithPath($this->data, $newPath);
+						if (is_null($value)) {
+							$tableArrNdx = 0;
+						}
+						else {
+							$tableArrNdx = count($value);
+						}
+					}
+
+					$fullPath = implode('.', array_map(function($item) {
+						return '"' . $item . '"';
+					}, $newPath));
+
+					if ($tableArrNdx !== false) {
+						$fullPath .= ".\"{$tableArrNdx}\"";
+					}
+
+					if (in_array($fullPath, $definedChildTables)) {
+						throw new Exception('Tables must be defined all in one place', $definitionOffset);
+					}
+					
+					$definedChildTables[] = $fullPath;
+
+					list($newPath, $tableType, $definitionOffset) = $this->readTable($tokenGen, $newPath, $tableArrNdx, $depth + 1);
+				}
+
+				return [null, null, null];
 			}
 
 			if (!$lineClear) {
@@ -139,8 +188,10 @@ class Toml {
 			$value = $this->readValue($tokenGen);
 
 			// Set value
-			$this->setKeyValueWithPath($this->data, array_merge($path, $key), $value);
+			$this->setKeyValueWithPath($this->data, array_merge($valuePath, $key), $value);
 		}
+
+		return [null, null, null];
 	}
 
 	private function readPath($tokenGen) {
@@ -612,7 +663,7 @@ class Toml {
 					$fullPath = implode('.', array_map(function($item) {
 						return '"' . $item . '"';
 					}, array_slice($path, 0, $ndx + 1)));
-					throw new Exception("Cannot re-set key {$fullPath}", -1);
+					throw new Exception("Cannot redefine key {$fullPath}", -1);
 				}
 				else {
 					$data[$key] = $value;
@@ -626,7 +677,7 @@ class Toml {
 					$fullPath = implode('.', array_map(function($item) {
 						return '"' . $item . '"';
 					}, array_slice($path, 0, $ndx + 1)));
-					throw new Exception("Cannot re-set key {$fullPath}", -1);
+					throw new Exception("Cannot redefine key {$fullPath}", -1);
 				}
 
 				unset($data);
