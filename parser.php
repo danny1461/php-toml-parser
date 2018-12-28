@@ -189,6 +189,7 @@ class Toml {
 
 			// Set value
 			$this->setKeyValueWithPath($this->data, array_merge($valuePath, $key), $value);
+			$lineClear = false;
 		}
 
 		return [null, null, null];
