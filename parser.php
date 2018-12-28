@@ -8,6 +8,16 @@ class Toml {
 
 		$this->processToml($toml);
 	}
+	
+	public static function parse(string $toml) {
+		$obj = new self($toml);
+		return $obj->data;
+	}
+	
+	public static function parseFile(string $path) {
+		$toml = file_get_contents($path);
+		return self::parse($toml);
+	}
 
 	private function cleanToml($toml) {
 		$toml = str_replace(["\r\n", "\n\r"], "\n", $toml);
