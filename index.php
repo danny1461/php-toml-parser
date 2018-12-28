@@ -1,8 +1,5 @@
 <?php
 
-ini_set('xdebug.var_display_max_depth', '10');
-ini_set('xdebug.var_display_max_data', '1024');
-
 require __DIR__ . '/parser.php';
 
 if (isset($_POST['toml'])) {
@@ -102,6 +99,9 @@ if (!isset($toml)) {
 				<?php
 				if (!ini_get('xdebug.overload_var_dump')) {
 					echo '<pre>';
+				}
+				else {
+					ini_set('xdebug.var_display_max_depth', '10');
 				}
 
 				var_dump($tomlObj->data);
