@@ -1,7 +1,7 @@
 <?php
 
 class Toml {
-	public $data = null;
+	public $data = [];
 
 	public function __construct(string $toml) {
 		$toml = $this->cleanToml($toml);
@@ -573,7 +573,7 @@ class Toml {
 
 		for ($i = 0; true; $i++) {
 			if ($i == $len) {
-				if (!$readingComment && ($quoteType || $token['type'] != ' ')) {
+				if ($token !== false && !$readingComment && ($quoteType || $token['type'] != ' ')) {
 					yield $token;
 				}
 
@@ -842,7 +842,11 @@ class Toml {
 		return self::parse($toml);
 	}
 
-	public static function toToml($input) {
+	public static function toToml(array $input) {
+		if (!count($input)) {
+			return '';
+		}
+		
 		return self::dataToToml($input);
 	}
 
