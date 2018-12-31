@@ -8,16 +8,6 @@ class Toml {
 
 		$this->processToml($toml);
 	}
-	
-	public static function parse(string $toml) {
-		$obj = new self($toml);
-		return $obj->data;
-	}
-	
-	public static function parseFile(string $path) {
-		$toml = file_get_contents($path);
-		return self::parse($toml);
-	}
 
 	private function cleanToml($toml) {
 		$toml = str_replace(["\r\n", "\n\r"], "\n", $toml);
@@ -189,6 +179,8 @@ class Toml {
 				throw new Exception('New definitions need to go on a new line');
 			}
 
+			$keyToken = $tokenGen->current();
+
 			$key = $this->readPath($tokenGen);
 			$token = $tokenGen->current();
 			if ($token['txt'] != '=') {
@@ -241,10 +233,6 @@ class Toml {
 						throw new Exception();
 					}
 
-					if ($token['type'] == 'd' && !$string) {
-						throw new Exception('Plain text variables need to start with an alpha character');
-					}
-
 					$string .= $token['txt'];
 					$needPart = false;
 				}
@@ -253,7 +241,7 @@ class Toml {
 						throw new Exception();
 					}
 
-					if ($string) {
+					if ($string !== '') {
 						$path[] = $string;
 					}
 					return $path;
@@ -453,7 +441,7 @@ class Toml {
 
 		if ($quoteType == '"' || $quoteType == '"""') {
 			// process escaped characters
-			if (preg_match_all('/(\\\\)([tnfr"\'\\\\]|u[0-9A-F]{8}|u[0-9A-F]{4}|\n\\s*)/', $str, $matches, PREG_OFFSET_CAPTURE)) {
+			if (preg_match_all(self::STRING_ESCAPES, $str, $matches, PREG_OFFSET_CAPTURE)) {
 				$newStr = '';
 				$lastStrNdx = 0;
 
@@ -725,9 +713,128 @@ class Toml {
 		}
 	}
 
+	private static function dataToToml($input, $path = '', $depth = 0) {
+		switch (gettype($input)) {
+			case 'boolean':
+				return [$input ? 'true' : 'false', false];
+			case 'integer':
+			case 'double':
+				return [strval($input), false];
+			case 'string':
+				$input = '"' . str_replace(
+					[
+						"\n",
+						"\t",
+						"\\"
+					],
+					[
+						'\\n',
+						'\\t',
+						'\\\\'
+					],
+					$input
+				) . '"';
+				return [$input, false];
+		}
+
+		// simple array
+		$isSimpleArray = count($input) == 0;
+		$isArrayOfTables = false;
+		if (!$isSimpleArray) {
+			if (array_keys($input) === range(0, count($input) - 1)) {
+				$isArrayOfTables = is_array($input[0]);
+				$isSimpleArray = !$isArrayOfTables;
+			}
+		}
+
+		$toml = '';
+
+		if ($isSimpleArray) {
+			foreach ($input as $key => $val) {
+				if ($toml) {
+					$toml .= ', ';
+				}
+				list($valueToml) = self::dataToToml($val, $path);
+				$toml .= $valueToml;
+			}
+
+			$toml = "[{$toml}]";
+			return [$toml, false];
+		}
+
+		$cleanPath = preg_replace('/\\.?__\\|\\d+\\|__/', '', $path);
+		$hadSubKeys = false;
+		$indent = str_repeat('  ', $depth);
+
+		foreach ($input as $key => $val) {
+			if ($isArrayOfTables) {
+				$toml .= "\n\n{$indent}[[{$cleanPath}]]";
+
+				foreach ($val as $k => $v) {
+					$childPath = "{$k}";
+					if ($cleanPath) {
+						$childPath = "{$cleanPath}.__|{$key}|__.{$childPath}";
+					}
+					list($valueToml, $valueIsTable) = self::dataToToml($v, $childPath, $depth + 1);
+
+					if ($valueIsTable) {
+						$toml .= "{$valueToml}";
+					}
+					else {
+						$toml .= "\n{$indent}  " . $k . ' = ' . $valueToml;
+					}
+				}
+			}
+			else {
+				$childPath = $key;
+				if ($cleanPath) {
+					$childPath = "{$cleanPath}.{$childPath}";
+				}
+
+				list($valueToml, $valueIsTable) = self::dataToToml($val, $childPath, $depth);
+
+				if ($valueIsTable) {
+					$toml .= "{$valueToml}";
+				}
+				else {
+					$toml .= "\n{$indent}  " . $key . ' = ' . $valueToml;
+					$hadSubKeys = true;
+				}
+			}
+		}
+
+		if (!$isArrayOfTables && $cleanPath && $hadSubKeys) {
+			$toml = "\n\n{$indent}[{$cleanPath}]{$toml}";
+		}
+
+		if ($path) {
+			return [$toml, true];
+		}
+		else {
+			return trim($toml);
+		}
+	}
+
+	/* Static Methods */
+
+	public static function parse(string $toml) {
+		$obj = new self($toml);
+		return $obj->data;
+	}
+	
+	public static function parseFile(string $path) {
+		$toml = file_get_contents($path);
+		return self::parse($toml);
+	}
+
+	public static function toToml($input) {
+		return self::dataToToml($input);
+	}
+
 	public const INT_REGEX = '/^(0x)([0-9A-F_]+)$|^(0o)([0-7_]+)$|^(0b)([01_]+)$|^([+-]?[0-9_]+)$/i';
 	public const FLOAT_REGEX = '/^([+-]?[0-9_]+(?:\\.[0-9_]+)?)(?:e([+-]?[0-9_]+))?$|^([+-])?(inf|nan)$/i';
 	public const DATE_REGEX = '/^(\\d{4}-\\d{2}-\\d{2})(?:T?(\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?))?(?:Z(\\d{1,2})?|-(\\d{2}):\\d{2})?$/';
 	public const TIME_REGEX = '/^(\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?)$/';
 	public const VALUE_TERMINATORS = "\n,}]";
+	public const STRING_ESCAPES = '/(\\\\)([tnfr"\'\\\\]|u[0-9A-F]{8}|u[0-9A-F]{4}|\n\\s*)/';
 }
