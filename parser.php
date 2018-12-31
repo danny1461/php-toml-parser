@@ -797,7 +797,7 @@ class Toml {
 					$toml .= "{$valueToml}";
 				}
 				else {
-					$toml .= "\n{$indent}  " . $key . ' = ' . $valueToml;
+					$toml .= "\n{$indent}" . $key . ' = ' . $valueToml;
 					$hadSubKeys = true;
 				}
 			}
