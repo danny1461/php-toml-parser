@@ -412,7 +412,11 @@ class Toml {
 		$basicString = $quoteType == '"' || $quoteType == "'";
 
 		$tokenGen->next();
-		while ($tokenGen->valid()) {
+		while (true) {
+			if (!$tokenGen->valid()) {
+				throw new Exception('String not terminated', $startOffset);
+			}
+
 			$token = $tokenGen->current();
 
 			if ($basicString && $token['txt'] == "\n") {
@@ -723,14 +727,14 @@ class Toml {
 			case 'string':
 				$input = '"' . str_replace(
 					[
+						"\\",
 						"\n",
-						"\t",
-						"\\"
+						"\t"
 					],
 					[
-						'\\n',
-						'\\t',
-						'\\\\'
+						"\\\\",
+						"\\n",
+						"\\t"
 					],
 					$input
 				) . '"';
@@ -765,6 +769,7 @@ class Toml {
 		$cleanPath = preg_replace('/\\.?__\\|\\d+\\|__/', '', $path);
 		$hadSubKeys = false;
 		$indent = str_repeat('  ', $depth);
+		$subTableToml = '';
 
 		foreach ($input as $key => $val) {
 			if ($isArrayOfTables) {
@@ -778,7 +783,7 @@ class Toml {
 					list($valueToml, $valueIsTable) = self::dataToToml($v, $childPath, $depth + 1);
 
 					if ($valueIsTable) {
-						$toml .= "{$valueToml}";
+						$subTableToml .= "{$valueToml}";
 					}
 					else {
 						$toml .= "\n{$indent}  " . $k . ' = ' . $valueToml;
@@ -794,7 +799,7 @@ class Toml {
 				list($valueToml, $valueIsTable) = self::dataToToml($val, $childPath, $depth);
 
 				if ($valueIsTable) {
-					$toml .= "{$valueToml}";
+					$subTableToml .= "{$valueToml}";
 				}
 				else {
 					$toml .= "\n{$indent}" . $key . ' = ' . $valueToml;
@@ -805,6 +810,10 @@ class Toml {
 
 		if (!$isArrayOfTables && $cleanPath && $hadSubKeys) {
 			$toml = "\n\n{$indent}[{$cleanPath}]{$toml}";
+		}
+
+		if ($subTableToml) {
+			$toml = "{$toml}{$subTableToml}";
 		}
 
 		if ($path) {
