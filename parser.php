@@ -748,6 +748,7 @@ class Toml {
 			if (array_keys($input) === range(0, count($input) - 1)) {
 				$isArrayOfTables = is_array($input[0]);
 				$isSimpleArray = !$isArrayOfTables;
+				$isArrayOfTables = $isArrayOfTables && $path;
 			}
 		}
 
@@ -788,6 +789,11 @@ class Toml {
 					else {
 						$toml .= "\n{$indent}  " . $k . ' = ' . $valueToml;
 					}
+				}
+
+				if ($subTableToml) {
+					$toml = "{$toml}{$subTableToml}";
+					$subTableToml = '';
 				}
 			}
 			else {
