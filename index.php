@@ -17,7 +17,7 @@ if (!isset($toml)) {
 	$toml = file_get_contents(__DIR__ . '/sample.toml');
 }
 
-?><<!DOCTYPE html>
+?><!DOCTYPE html>
 <html>
 <head>
 	<meta charset="utf-8" />
@@ -110,6 +110,8 @@ if (!isset($toml)) {
 					echo '</pre>';
 				}
 				?>
+				<h2>Generated TOML From Output</h2>
+				<pre><?= Toml::toToml($tomlData) ?></pre>
 			</div>
 		</div>
 		<?php endif; ?>
