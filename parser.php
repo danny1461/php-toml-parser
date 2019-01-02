@@ -2,11 +2,13 @@
 
 class Toml {
 	public $data = [];
+	private $tokenGen = null;
 
 	public function __construct(string $toml) {
 		$toml = $this->cleanToml($toml);
 
 		$this->processToml($toml);
+		$this->tokenGen = null;
 	}
 
 	private function cleanToml($toml) {
@@ -17,10 +19,10 @@ class Toml {
 	}
 
 	private function processToml($toml) {
-		$tokenGen = $this->tokenizeToml($toml);
+		$this->tokenGen = $this->tokenizeToml($toml);
 
 		try {
-			$this->readTable($tokenGen, []);
+			$this->readTable([]);
 		}
 		catch (Exception $e) {
 			$msg = $e->getMessage();
@@ -32,8 +34,8 @@ class Toml {
 			$txt = '';
 
 			if ($offset == 0) {
-				if ($tokenGen->valid()) {
-					$token = $tokenGen->current();
+				if ($this->tokenGen->valid()) {
+					$token = $this->tokenGen->current();
 					$offset = $token['offset'];
 				}
 				else {
@@ -60,19 +62,11 @@ class Toml {
 			}
 
 			if (!$msg) {
-				if (!$tokenGen->valid()) {
+				if (!$this->tokenGen->valid()) {
 					$msg = 'Unexpected EOF';
 				}
 				else {
-					switch ($txt) {
-						case "\n":
-							$txt = '\\n';
-							break;
-						case "\t":
-							$txt = '\\t';
-							break;
-					}
-
+					$txt = str_replace(["\n", "\t"], ["\\n", "\\t"], $txt);
 					$msg = "Unexpected character '{$txt}'";
 				}
 			}
@@ -86,7 +80,7 @@ class Toml {
 	}
 
 	/* Process Token Helpers */
-	private function readTable($tokenGen, $path, $arrNdx = false, $depth = 0) {
+	private function readTable($path, $arrNdx = false) {
 		$key = false;
 		$value = false;
 		$lineClear = true;
@@ -98,30 +92,34 @@ class Toml {
 			$this->setKeyValueWithPath($this->data, $valuePath, []);
 		}
 
-		while ($tokenGen->valid()) {
-			$token = $tokenGen->current();
+		while ($this->tokenGen->valid()) {
+			$token = $this->tokenGen->current();
 
 			if ($token['txt'] == "\n") {
-				$tokenGen->next();
+				$this->tokenGen->next();
 				$lineClear = true;
 				continue;
 			}
 
+			if (!$lineClear) {
+				throw new Exception();
+			}
+
 			if ($token['type'] == '[') {
 				$tableType = $token['txt'];
-				$tokenGen->next();
-				$token = $tokenGen->current();
+				$this->tokenGen->next();
+				$token = $this->tokenGen->current();
 				$definitionOffset = $token['offset'];
-				$newPath = $this->readPath($tokenGen);
-				$token = $tokenGen->current();
+				$newPath = $this->readPath();
+				$token = $this->tokenGen->current();
 				if ($token['type'] != ']' || strlen($token['txt']) != strlen($tableType)) {
 					throw new Exception();
 				}
-				$tokenGen->next();
-				if (!$tokenGen->valid()) {
+				$this->tokenGen->next();
+				if (!$this->tokenGen->valid()) {
 					return [null, null, $definitionOffset];
 				}
-				$token = $tokenGen->current();
+				$token = $this->tokenGen->current();
 				if ($token['txt'] != "\n") {
 					throw new Exception();
 				}
@@ -169,25 +167,21 @@ class Toml {
 					
 					$definedChildTables[] = $fullPath;
 
-					list($newPath, $tableType, $definitionOffset) = $this->readTable($tokenGen, $newPath, $tableArrNdx, $depth + 1);
+					list($newPath, $tableType, $definitionOffset) = $this->readTable($newPath, $tableArrNdx);
 				}
 
 				return [null, null, null];
 			}
 
-			if (!$lineClear) {
-				throw new Exception('New definitions need to go on a new line');
-			}
+			$keyToken = $this->tokenGen->current();
 
-			$keyToken = $tokenGen->current();
-
-			$key = $this->readPath($tokenGen);
-			$token = $tokenGen->current();
+			$key = $this->readPath();
+			$token = $this->tokenGen->current();
 			if ($token['txt'] != '=') {
 				throw new Exception();
 			}
-			$tokenGen->next();
-			$value = $this->readValue($tokenGen);
+			$this->tokenGen->next();
+			$value = $this->readValue();
 
 			// Set value
 			$this->setKeyValueWithPath($this->data, array_merge($valuePath, $key), $value);
@@ -197,14 +191,14 @@ class Toml {
 		return [null, null, null];
 	}
 
-	private function readPath($tokenGen) {
+	private function readPath() {
 		$path = [];
 		$string = '';
 		$needDelim = false;
 		$needPart = true;
 
-		while ($tokenGen->valid()) {
-			$token = $tokenGen->current();
+		while ($this->tokenGen->valid()) {
+			$token = $this->tokenGen->current();
 
 			if ($token['txt'] == '.') {
 				if ($string) {
@@ -223,7 +217,7 @@ class Toml {
 						throw new Exception();
 					}
 
-					$path[] = $this->readString($tokenGen);
+					$path[] = $this->readString();
 					$needDelim = true;
 					$needPart = false;
 					continue;
@@ -248,27 +242,27 @@ class Toml {
 				}
 			}
 
-			$tokenGen->next();
+			$this->tokenGen->next();
 		}
 
 		throw new Exception();
 	}
 
-	private function readValue($tokenGen) {
-		if (!$tokenGen->valid()) {
+	private function readValue() {
+		if (!$this->tokenGen->valid()) {
 			throw new Exception();
 		}
 
-		$token = $tokenGen->current();
+		$token = $this->tokenGen->current();
 
 		if ($token['type'] == '"' || $token['type'] == "'") {
-			return $this->readString($tokenGen);
+			return $this->readString();
 		}
 		elseif ($token['txt'] == '{') {
-			return $this->readInlineTable($tokenGen);
+			return $this->readInlineTable();
 		}
 		elseif ($token['txt'] == '[') {
-			return $this->readArray($tokenGen);
+			return $this->readArray();
 		}
 		else {
 			$str = '';
@@ -276,11 +270,11 @@ class Toml {
 
 			while (strpos(self::VALUE_TERMINATORS, $token['txt']) === false) {
 				$str .= $token['txt'];
-				$tokenGen->next();
-				if (!$tokenGen->valid()) {
+				$this->tokenGen->next();
+				if (!$this->tokenGen->valid()) {
 					break;
 				}
-				$token = $tokenGen->current();
+				$token = $this->tokenGen->current();
 			}
 
 			// What is it?
@@ -402,8 +396,8 @@ class Toml {
 		}
 	}
 
-	private function readString($tokenGen) {
-		$token = $tokenGen->current();
+	private function readString() {
+		$token = $this->tokenGen->current();
 		$quoteType = $token['txt'];
 		$quoteLen = strlen($quoteType);
 		$startOffset = $token['offset'];
@@ -411,13 +405,13 @@ class Toml {
 		$str = '';
 		$basicString = $quoteType == '"' || $quoteType == "'";
 
-		$tokenGen->next();
+		$this->tokenGen->next();
 		while (true) {
-			if (!$tokenGen->valid()) {
+			if (!$this->tokenGen->valid()) {
 				throw new Exception('String not terminated', $startOffset);
 			}
 
-			$token = $tokenGen->current();
+			$token = $this->tokenGen->current();
 
 			if ($basicString && $token['txt'] == "\n") {
 				throw new Exception("Basic and literal strings do not support newlines", $token['offset']);
@@ -435,9 +429,9 @@ class Toml {
 			}
 
 			$str .= $token['txt'];
-			$tokenGen->next();
+			$this->tokenGen->next();
 		}
-		$tokenGen->next();
+		$this->tokenGen->next();
 
 		if ($quoteLen === 3 && $str[0] == "\n") {
 			$str = substr($str, 1);
@@ -499,28 +493,28 @@ class Toml {
 		return $str;
 	}
 
-	private function readInlineTable($tokenGen) {
+	private function readInlineTable() {
 		$data = [];
 
-		$tokenGen->next();
-		while ($tokenGen->valid()) {
-			$token = $tokenGen->current();
+		$this->tokenGen->next();
+		while ($this->tokenGen->valid()) {
+			$token = $this->tokenGen->current();
 
 			if ($token['txt'] == '}') {
-				$tokenGen->next();
+				$this->tokenGen->next();
 				return $data;
 			}
 			elseif ($token['txt'] == ',') {
-				$tokenGen->next();
+				$this->tokenGen->next();
 			}
 
-			$key = $this->readPath($tokenGen);
-			$token = $tokenGen->current();
+			$key = $this->readPath();
+			$token = $this->tokenGen->current();
 			if ($token['txt'] != '=') {
 				throw new Exception();
 			}
-			$tokenGen->next();
-			$value = $this->readValue($tokenGen);
+			$this->tokenGen->next();
+			$value = $this->readValue();
 
 			$this->setKeyValueWithPath($data, $key, $value);
 		}
@@ -528,25 +522,25 @@ class Toml {
 		throw new Exception();
 	}
 
-	private function readArray($tokenGen) {
+	private function readArray() {
 		$data = [];
 		$type = null;
 
-		$tokenGen->next();
-		while ($tokenGen->valid()) {
-			$token = $tokenGen->current();
+		$this->tokenGen->next();
+		while ($this->tokenGen->valid()) {
+			$token = $this->tokenGen->current();
 
 			if ($token['txt'] == "\n" || $token['txt'] == ',') {
-				$tokenGen->next();
+				$this->tokenGen->next();
 				continue;
 			}
 			elseif ($token['txt'] == ']') {
-				$tokenGen->next();
+				$this->tokenGen->next();
 				return $data;
 			}
 
-			$token = $tokenGen->current();
-			$value = $this->readValue($tokenGen);
+			$token = $this->tokenGen->current();
+			$value = $this->readValue();
 			if (is_null($type)) {
 				$type = gettype($value);
 			}
@@ -719,37 +713,72 @@ class Toml {
 
 	private static function dataToToml($input, $path = '', $depth = 0) {
 		switch (gettype($input)) {
+			case 'NULL':
+				return ['', false];
 			case 'boolean':
 				return [$input ? 'true' : 'false', false];
 			case 'integer':
 			case 'double':
 				return [strval($input), false];
 			case 'string':
-				$input = '"' . str_replace(
-					[
-						"\\",
-						"\n",
-						"\t"
-					],
-					[
-						"\\\\",
-						"\\n",
-						"\\t"
-					],
-					$input
-				) . '"';
-				return [$input, false];
+				if (ctype_print($input)) {
+					return ["'{$input}'", false];
+				}
+				else {
+					$input = '"' . str_replace(
+						[
+							"\\",
+							"\n",
+							"\t"
+						],
+						[
+							"\\\\",
+							"\\n",
+							"\\t"
+						],
+						$input
+					) . '"';
+					return [$input, false];
+				}
+			case 'object':
+				throw new Exception('TOML cannot be used to serialize objects');
 		}
 
-		// simple array
-		$isSimpleArray = count($input) == 0;
+		// Array types
+
+		$isSimpleArray = false;
 		$isArrayOfTables = false;
-		if (!$isSimpleArray) {
-			if (array_keys($input) === range(0, count($input) - 1)) {
-				$isArrayOfTables = is_array($input[0]);
-				$isSimpleArray = !$isArrayOfTables;
-				$isArrayOfTables = $isArrayOfTables && $path;
+		$isSimpleTable = false;
+
+		if (count($input) == 0) {
+			$isSimpleArray = true;
+		}
+		elseif (array_keys($input) === range(0, count($input) - 1)) {
+			$rootType = null;
+			foreach ($input as $k => $v) {
+				$type = gettype($v);
+
+				if (is_null($rootType)) {
+					$rootType = $type;
+				}
+				elseif ($rootType != $type) {
+					$rootType = null;
+					break;
+				}
 			}
+
+			if (is_null($rootType)) {
+				$isSimpleTable = true;
+			}
+			elseif ($rootType == 'array') {
+				$isArrayOfTables = true;
+			}
+			else {
+				$isSimpleArray = true;
+			}
+		}
+		else {
+			$isSimpleTable = true;
 		}
 
 		$toml = '';
@@ -766,17 +795,21 @@ class Toml {
 			$toml = "[{$toml}]";
 			return [$toml, false];
 		}
-
+		
 		$cleanPath = preg_replace('/\\.?__\\|\\d+\\|__/', '', $path);
 		$hadSubKeys = false;
 		$indent = str_repeat('  ', $depth);
 		$subTableToml = '';
-
-		foreach ($input as $key => $val) {
-			if ($isArrayOfTables) {
+		
+		if ($isArrayOfTables) {
+			foreach ($input as $key => $val) {
 				$toml .= "\n\n{$indent}[[{$cleanPath}]]";
 
 				foreach ($val as $k => $v) {
+					if (!ctype_alnum($k)) {
+						$k = "\"{$k}\"";
+					}
+
 					$childPath = "{$k}";
 					if ($cleanPath) {
 						$childPath = "{$cleanPath}.__|{$key}|__.{$childPath}";
@@ -786,17 +819,22 @@ class Toml {
 					if ($valueIsTable) {
 						$subTableToml .= "{$valueToml}";
 					}
-					else {
+					elseif ($valueToml != '') {
 						$toml .= "\n{$indent}  " . $k . ' = ' . $valueToml;
 					}
 				}
 
 				if ($subTableToml) {
 					$toml = "{$toml}{$subTableToml}";
-					$subTableToml = '';
 				}
 			}
-			else {
+		}
+		else {
+			foreach ($input as $key => $val) {
+				if (!ctype_alnum($key)) {
+					$key = "\"{$key}\"";
+				}
+
 				$childPath = $key;
 				if ($cleanPath) {
 					$childPath = "{$cleanPath}.{$childPath}";
@@ -807,19 +845,19 @@ class Toml {
 				if ($valueIsTable) {
 					$subTableToml .= "{$valueToml}";
 				}
-				else {
+				elseif ($valueToml != '') {
 					$toml .= "\n{$indent}" . $key . ' = ' . $valueToml;
 					$hadSubKeys = true;
 				}
 			}
-		}
 
-		if (!$isArrayOfTables && $cleanPath && $hadSubKeys) {
-			$toml = "\n\n{$indent}[{$cleanPath}]{$toml}";
-		}
+			if ($cleanPath && $hadSubKeys) {
+				$toml = "\n\n{$indent}[{$cleanPath}]{$toml}";
+			}
 
-		if ($subTableToml) {
-			$toml = "{$toml}{$subTableToml}";
+			if ($subTableToml) {
+				$toml = "{$toml}{$subTableToml}";
+			}
 		}
 
 		if ($path) {
